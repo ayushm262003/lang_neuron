@@ -12,7 +12,7 @@ import torch
 from torch import nn
 from torch.utils.hooks import RemovableHandle
 from dataclasses import dataclass
-from transformers import AutoModelForCausalLM, AutoModelForPreTraining, AutoConfig, LlamaForCausalLM, XGLMForCausalLM, BloomForCausalLM
+from transformers import AutoModelForCausalLM, AutoModelForPreTraining, AutoConfig, LlamaForCausalLM, XGLMForCausalLM, BloomForCausalLM, AutoModel
 
 MODEL_INPUT_FIELDS = ["input_ids", "attention_mask"]
 LABELS_FIELD = "labels"
@@ -343,7 +343,7 @@ def transformers_model_name_to_family(model_name: str) -> str:
         str: The family name
 
     """
-    if model_name.startswith("bert"):
+    if "bert" in model_name.lower() or "mbert" in model_name.lower():
         return "bert"
     elif model_name.startswith("openai"):
         return "openai"
@@ -426,8 +426,10 @@ def transformers_class_from_name(
                                                      #device_map="auto",
                                                      #device_map = 0,
                                                     ).to("cuda")
+            if 'bert' in model_name:
+                m=AutoModel.from_pretrained(model_name)
             else:
-                #m = AutoModelForPreTraining.from_pretrained(model_name, cache_dir=cache_dir, device_map="auto")
+                # m = AutoModelForPreTraining.from_pretrained(model_name, cache_dir=cache_dir, device_map="auto")
                 raise ValueError("error! model_name is not properly defined.")
             
             try:
@@ -491,7 +493,18 @@ def get_layer_regex(model_name: str) -> t.Optional[t.List[str]]:
             "model.layers.([0-9]|[0-9][0-9]).fc1",
             "model.layers.([0-9]|[0-9][0-9]).fc2",
         ]
+    elif family == "bert":
+            layer_types = [
+                "bert.encoder.layer.([0-9]|[0-9][0-9]).attention.self.query",
+                "bert.encoder.layer.([0-9]|[0-9][0-9]).attention.self.key",
+                "bert.encoder.layer.([0-9]|[0-9][0-9]).attention.self.value",
+                "bert.encoder.layer.([0-9]|[0-9][0-9]).attention.output.dense",
+                "bert.encoder.layer.([0-9]|[0-9][0-9]).intermediate.dense",
+                "bert.encoder.layer.([0-9]|[0-9][0-9]).output.dense",
+            ]
+            # Extended for bert model 
     # Extend to other model families here if needed
+
     return layer_types
 
 
@@ -545,6 +558,13 @@ def _collect_responses_info_for_model(model: TorchModel, model_family: str) -> t
             if ri.layer.kind in ["Conv1D", "BertLayerNorm", "Linear"]
             and len(ri.shape) in [2, 3]
             and "lm_head" not in ri.name
+        ],
+        "bert": [  # Extended for BERT models
+            ri
+            for ri in model.get_response_infos()
+            if ri.layer.kind in ["Linear", "BertLayerNorm", "Embedding"]
+            and len(ri.shape) in [2, 3]
+            and "pooler" not in ri.name
         ],
         # Extend to other models here
     }
